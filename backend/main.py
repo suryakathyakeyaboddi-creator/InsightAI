@@ -13,6 +13,8 @@ from data_processor import load_and_clean
 from schema_extractor import extract_schema, schema_to_prompt_text
 from sql_generator import generate_sql, execute_with_retry, select_chart_type
 from insight_generator import generate_insight
+from summarize_generator import generate_page_summary
+from suggested_questions import generate_suggested_questions
 from anomaly_detector import auto_insights, compute_correlations, detect_anomalies, get_anomaly_summary
 
 # ---------------------------------------------------------------------------
@@ -94,6 +96,14 @@ class AnomalyRequest(BaseModel):
     session_id: str
 
 
+class PageContextRequest(BaseModel):
+    session_id: str | None = None
+    current_path: str
+    active_tab: str | None = None
+    data_summary: str | None = None
+    model: str = "llama-3.1-8b-instant"
+
+
 # ---------------------------------------------------------------------------
 # Pydantic response models
 # ---------------------------------------------------------------------------
@@ -131,6 +141,14 @@ class AnomalyResponse(BaseModel):
     percentage: float
     anomaly_rows: list[dict[str, Any]]
     full_data: list[dict[str, Any]]
+
+
+class SummaryResponse(BaseModel):
+    summary: str
+
+
+class SuggestedQuestionsResponse(BaseModel):
+    questions: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -274,9 +292,10 @@ async def auto_insights_endpoint(session_id: str = Query(...), model: str = "lla
     df = session["df"]
     schema = session["schema"]
 
-    # Return cached insights if available (and no model change), else compute
-    # For now, always re-compute if model is provided to ensure it uses the desired model
-    insights = auto_insights(df, schema, model=model)
+    try:
+        insights = auto_insights(df, schema, model=model)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI generation failed. Please try again or switch back to Llama 3.1: {str(e)}")
 
     corr_df = compute_correlations(df)
 
@@ -309,6 +328,31 @@ async def anomalies_endpoint(req: AnomalyRequest):
     return AnomalyResponse(**summary)
 
 
+@app.post("/api/summarize-context", response_model=SummaryResponse)
+async def summarize_context(req: PageContextRequest):
+    try:
+        data_summary = req.data_summary
+        
+        # If we have a session but no explicit data summary strings passed from frontend,
+        # we could inject schema information here. But relying on the frontend 
+        # to pass what's on screen (like row counts, top insights) is better.
+        if req.session_id and not data_summary:
+            session = _get_session(req.session_id)
+            schema = session["schema"]
+            row_count = len(session["df"])
+            data_summary = f"Dataset: {schema.get('filename', 'Unknown')}\nRows: {row_count}\nColumns: {list(schema.keys())}"
+
+        summary = generate_page_summary(
+            current_path=req.current_path,
+            active_tab=req.active_tab,
+            data_summary=data_summary,
+            model=req.model
+        )
+        return SummaryResponse(summary=summary)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/preview")
 async def preview_data(session_id: str = Query(...), limit: int = Query(100, ge=1, le=1000)):
     session = _get_session(session_id)
@@ -323,3 +367,17 @@ async def preview_data(session_id: str = Query(...), limit: int = Query(100, ge=
         "rows": result.to_dict(orient="records"),
         "total_rows": total_rows,
     }
+
+
+@app.post("/api/suggested-questions", response_model=SuggestedQuestionsResponse)
+async def suggested_questions_endpoint(req: QueryRequest):
+    session = _get_session(req.session_id)
+    df = session["df"]
+    schema = session["schema"]
+    
+    try:
+        questions = generate_suggested_questions(df, schema, model=req.model)
+        return SuggestedQuestionsResponse(questions=questions)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

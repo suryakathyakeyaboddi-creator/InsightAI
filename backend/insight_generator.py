@@ -1,4 +1,5 @@
 import os
+import re
 import pandas as pd
 from groq import Groq
 from dotenv import load_dotenv
@@ -18,4 +19,8 @@ def generate_insight(question: str, result_df: pd.DataFrame, model: str = "llama
         temperature=0.3
     )
 
-    return response.choices[0].message.content.strip()
+    raw = response.choices[0].message.content.strip()
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.IGNORECASE | re.DOTALL).strip()
+    
+    return raw
+

@@ -10,14 +10,22 @@ client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 
 def _clean_sql(sql: str) -> str:
-    """Strip markdown fences, leading/trailing whitespace, and
-    convert MySQL-style backtick identifiers to DuckDB double-quotes."""
-    # Strip ```sql ... ``` or ``` ... ```
-    sql = re.sub(r"^```(?:sql)?\s*", "", sql.strip(), flags=re.IGNORECASE)
-    sql = re.sub(r"\s*```$", "", sql.strip())
-    # Replace backtick-quoted identifiers with double-quoted ones
-    # e.g. `math score` -> "math score"
+    """Extract raw SQL, ignoring <think> blocks and markdown fences, and fix quoting."""
+    
+    # 1. Remove <think>...</think> blocks entirely (for Qwen/Deepseek models)
+    sql = re.sub(r"<think>.*?</think>", "", sql, flags=re.IGNORECASE | re.DOTALL)
+    
+    # 2. Extract SQL from markdown block if it exists (e.g., ```sql ... ```)
+    match = re.search(r"```(?:sql)?(.*?)```", sql, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        sql = match.group(1)
+        
+    sql = sql.strip()
+    
+    # 3. Replace backtick-quoted identifiers with double-quoted ones
+    # DuckDB requires "math score" not `math score`
     sql = re.sub(r"`([^`]+)`", r'"\1"', sql)
+    
     return sql.strip()
 
 

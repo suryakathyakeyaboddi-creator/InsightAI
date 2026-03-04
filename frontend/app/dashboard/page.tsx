@@ -12,11 +12,12 @@ import ChatInterface from '@/components/ChatInterface';
 import AutoInsightsPanel from '@/components/AutoInsightsPanel';
 import AnomalyPanel from '@/components/AnomalyPanel';
 import DataPreviewTable from '@/components/DataPreviewTable';
+import PageSummarizer from '@/components/PageSummarizer';
 
 const MODELS = [
     { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B', desc: 'Fastest & Efficient' },
     { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B', desc: 'Most Powerful' },
-    { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B', desc: 'Versatile Expert' },
+    { id: 'qwen/qwen3-32b', name: 'Qwen 3 32B', desc: 'High Quality Alternative' },
 ];
 
 function DashboardContent() {
@@ -26,6 +27,7 @@ function DashboardContent() {
 
     const [schema, setSchema] = useState<any>(null);
     const [selectedModel, setSelectedModel] = useState(MODELS[0].id);
+    const [activeTab, setActiveTab] = useState('chat');
 
     useEffect(() => {
         if (!sessionId) {
@@ -168,7 +170,7 @@ function DashboardContent() {
                     </header>
 
                     <div className="w-full max-w-7xl mx-auto p-6 md:p-10 space-y-8">
-                        <Tabs defaultValue="chat" className="space-y-8">
+                        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
                             <TabsList className="flex w-fit items-center gap-1 rounded-2xl bg-muted/50 p-1.5 border border-border/50">
                                 <TabsTrigger value="chat" className="rounded-xl px-5 py-2 data-[state=active]:bg-background data-[state=active]:shadow-md">Ask a Question</TabsTrigger>
                                 <TabsTrigger value="insights" className="rounded-xl px-5 py-2 data-[state=active]:bg-background data-[state=active]:shadow-md">Auto Insights</TabsTrigger>
@@ -196,6 +198,12 @@ function DashboardContent() {
                     </div>
                 </main>
             </div>
+            
+            <PageSummarizer 
+                sessionId={sessionId} 
+                activeTab={activeTab} 
+                model={selectedModel} 
+            />
         </>
     );
 }

@@ -5,6 +5,7 @@ import { Sparkles, BarChart3, Brain } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Toaster } from '@/components/ui/sonner';
 import FileUpload from '@/components/FileUpload';
+import PageSummarizer from '@/components/PageSummarizer';
 
 const EXAMPLE_QUESTIONS = [
   'Total revenue by region',
@@ -77,6 +78,7 @@ export default function HomePage() {
           </div>
         </div>
       </main>
+      <PageSummarizer />
     </>
   );
 }

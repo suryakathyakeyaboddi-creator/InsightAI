@@ -1,4 +1,5 @@
 import os
+import re
 import pandas as pd
 import numpy as np
 from groq import Groq
@@ -28,6 +29,7 @@ def auto_insights(df: pd.DataFrame, schema: dict, model: str = "llama-3.1-8b-ins
     )
 
     raw = response.choices[0].message.content.strip()
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.IGNORECASE | re.DOTALL).strip()
     lines = [l.strip() for l in raw.splitlines() if l.strip()]
     # Guarantee exactly 3 strings
     if len(lines) >= 3:

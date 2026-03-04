@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import InsightCard from '@/components/InsightCard';
 import ChartRenderer from '@/components/ChartRenderer';
-import { queryData } from '@/lib/api';
+import { queryData, getSuggestedQuestions } from '@/lib/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,50 +32,6 @@ interface ChatInterfaceProps {
     sessionId: string;
     schema?: any;
     model?: string;
-}
-
-// ─── Suggestion Generator ─────────────────────────────────────────────────────
-
-function buildSuggestions(schema: any): string[] {
-    if (!schema?.columns) return [
-        'Show total revenue by region',
-        'What are the top 5 products?',
-        'Show monthly trends',
-        'Which region has the highest cost?',
-    ];
-
-    const cols: string[] = schema.columns.map((c: string) => c.toLowerCase());
-    const suggestions: string[] = [];
-
-    const regionCol = cols.find(c => c.includes('region') || c.includes('country') || c.includes('area') || c.includes('city'));
-    const revenueCol = cols.find(c => c.includes('revenue') || c.includes('sales') || c.includes('amount'));
-    const dateCol = cols.find(c => c.includes('date') || c.includes('month') || c.includes('year') || c.includes('time'));
-    const productCol = cols.find(c => c.includes('product') || c.includes('item') || c.includes('category'));
-    const costCol = cols.find(c => c.includes('cost') || c.includes('expense') || c.includes('price'));
-    const qtyCol = cols.find(c => c.includes('unit') || c.includes('qty') || c.includes('count') || c.includes('quantity'));
-
-    if (revenueCol && regionCol)
-        suggestions.push(`Show ${revenueCol} by ${regionCol}`);
-    if (dateCol && revenueCol)
-        suggestions.push(`Show monthly ${revenueCol} trend`);
-    if (productCol && (revenueCol || qtyCol))
-        suggestions.push(`Top 5 ${productCol}s by ${revenueCol ?? qtyCol}`);
-    if (costCol && regionCol)
-        suggestions.push(`Compare ${costCol} across ${regionCol}s`);
-
-    // Fallback generics
-    while (suggestions.length < 4) {
-        const fallbacks = [
-            'Show total revenue by region',
-            'What are the top 5 products?',
-            'Show monthly trends',
-            'Which region has the highest cost?',
-        ];
-        const fb = fallbacks[suggestions.length];
-        if (!suggestions.includes(fb)) suggestions.push(fb);
-    }
-
-    return suggestions.slice(0, 4);
 }
 
 // ─── SQL Collapsible ──────────────────────────────────────────────────────────
@@ -115,10 +71,42 @@ export default function ChatInterface({ sessionId, schema, model = 'llama-3.1-8b
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
+    
+    // Smart suggestions states
+    const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
+    const [loadingSuggestions, setLoadingSuggestions] = useState(true);
+    
     const bottomRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
-    const suggestions = buildSuggestions(schema);
+    // Fetch smart suggestions on mount or when session/model changes
+    useEffect(() => {
+        let mounted = true;
+        async function fetchSuggestions() {
+            setLoadingSuggestions(true);
+            try {
+                const res = await getSuggestedQuestions(sessionId, model);
+                if (mounted && res?.questions) {
+                    setSuggestedQuestions(res.questions);
+                }
+            } catch (error) {
+                console.error("Failed to fetch smart questions:", error);
+                if (mounted) {
+                    setSuggestedQuestions([
+                        'Show total revenue by region',
+                        'What are the top 5 products?',
+                        'Show monthly trends',
+                        'Which region has the highest cost?',
+                    ]);
+                }
+            } finally {
+                if (mounted) setLoadingSuggestions(false);
+            }
+        }
+        
+        fetchSuggestions();
+        return () => { mounted = false; };
+    }, [sessionId, model]);
 
     // Auto-scroll to bottom whenever messages change
     useEffect(() => {
@@ -174,21 +162,31 @@ export default function ChatInterface({ sessionId, schema, model = 'llama-3.1-8b
             <ScrollArea className="flex-1 px-4 py-4">
                 {messages.length === 0 && !loading ? (
                     /* Empty state — suggestion chips */
-                    <div className="flex h-full flex-col items-center justify-center gap-6 py-8 text-center">
+                    <div className="flex h-full flex-col items-center justify-center gap-6 py-8 text-center animate-in fade-in duration-500">
                         <div className="space-y-1">
-                            <p className="text-sm font-semibold text-foreground">Ask anything about your data</p>
-                            <p className="text-xs text-muted-foreground">Click a suggestion or type your own question</p>
+                            <h3 className="text-xl font-semibold text-foreground">Ask anything about your data</h3>
+                            <p className="text-sm text-muted-foreground w-64 md:w-80">
+                                Click a smart suggestion generated from your dataset, or type your own question.
+                            </p>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 w-full max-w-md">
-                            {suggestions.map((s) => (
-                                <button
-                                    key={s}
-                                    onClick={() => sendMessage(s)}
-                                    className="rounded-xl border bg-muted/40 px-3 py-3 text-left text-xs font-medium text-foreground transition-all hover:border-violet-400 hover:bg-violet-500/10 hover:text-violet-400"
-                                >
-                                    {s}
-                                </button>
-                            ))}
+                        <div className="grid grid-cols-2 gap-3 w-full max-w-lg mt-4">
+                            {loadingSuggestions ? (
+                                <>
+                                    {[0, 1, 2, 3].map(i => (
+                                        <div key={i} className="rounded-xl border border-border/50 bg-background/50 p-4 h-[72px] animate-pulse" />
+                                    ))}
+                                </>
+                            ) : (
+                                suggestedQuestions.map((s, i) => (
+                                    <button
+                                        key={i}
+                                        onClick={() => sendMessage(s)}
+                                        className="group flex flex-col justify-center rounded-xl border border-border/50 bg-background/50 p-4 text-left text-sm font-medium text-muted-foreground transition-all hover:border-violet-500/30 hover:bg-violet-500/5 hover:text-violet-600 shadow-sm"
+                                    >
+                                        <span className="line-clamp-2 leading-relaxed">{s}</span>
+                                    </button>
+                                ))
+                            )}
                         </div>
                     </div>
                 ) : (
