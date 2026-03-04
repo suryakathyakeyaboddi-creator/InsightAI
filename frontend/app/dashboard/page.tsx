@@ -13,12 +13,19 @@ import AutoInsightsPanel from '@/components/AutoInsightsPanel';
 import AnomalyPanel from '@/components/AnomalyPanel';
 import DataPreviewTable from '@/components/DataPreviewTable';
 
+const MODELS = [
+    { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B', desc: 'Fastest & Efficient' },
+    { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B', desc: 'Most Powerful' },
+    { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B', desc: 'Versatile Expert' },
+];
+
 function DashboardContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const sessionId = searchParams.get('session');
 
     const [schema, setSchema] = useState<any>(null);
+    const [selectedModel, setSelectedModel] = useState(MODELS[0].id);
 
     useEffect(() => {
         if (!sessionId) {
@@ -49,6 +56,42 @@ function DashboardContent() {
                         </span>
                     </div>
                     <div className="flex-1 overflow-y-auto p-6 space-y-8 scrollbar-hide">
+                        {/* Intelligence Model Selector */}
+                        <div className="space-y-4">
+                            <p className="text-[10px] uppercase font-bold tracking-[0.2em] text-muted-foreground/60">
+                                Intelligence Model
+                            </p>
+                            <div className="space-y-2">
+                                {MODELS.map((m) => (
+                                    <button
+                                        key={m.id}
+                                        onClick={() => setSelectedModel(m.id)}
+                                        className={[
+                                            'w-full text-left px-4 py-3 rounded-2xl border transition-all group relative overflow-hidden',
+                                            selectedModel === m.id
+                                                ? 'bg-violet-500/10 border-violet-500/30 ring-1 ring-violet-500/20'
+                                                : 'bg-muted/30 border-border/50 hover:bg-muted/50 hover:border-border'
+                                        ].join(' ')}
+                                    >
+                                        <div className="relative z-10 flex flex-col">
+                                            <span className={[
+                                                'text-sm font-semibold transition-colors',
+                                                selectedModel === m.id ? 'text-violet-600' : 'text-foreground/80 group-hover:text-foreground'
+                                            ].join(' ')}>
+                                                {m.name}
+                                            </span>
+                                            <span className="text-[10px] text-muted-foreground/70">{m.desc}</span>
+                                        </div>
+                                        {selectedModel === m.id && (
+                                            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                                <div className="h-1.5 w-1.5 rounded-full bg-violet-500 animate-pulse" />
+                                            </div>
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
                         {/* Dataset info */}
                         <div className="space-y-4">
                             <p className="text-[10px] uppercase font-bold tracking-[0.2em] text-muted-foreground/60">
@@ -58,6 +101,7 @@ function DashboardContent() {
                                 <Database className="h-5 w-5 text-violet-500 shrink-0" />
                                 <span className="text-sm font-semibold truncate text-foreground">{datasetName}</span>
                             </div>
+
                             {schema ? (
                                 <div className="grid grid-cols-2 gap-2">
                                     <div className="flex flex-col gap-1 rounded-xl bg-muted/30 p-2.5 border border-border/50">
@@ -133,12 +177,13 @@ function DashboardContent() {
                             </TabsList>
 
                             <TabsContent value="chat" className="mt-0 focus-visible:outline-none">
-                                <ChatInterface sessionId={sessionId} schema={schema} />
+                                <ChatInterface sessionId={sessionId} schema={schema} model={selectedModel} />
                             </TabsContent>
 
                             <TabsContent value="insights" className="mt-0 focus-visible:outline-none">
-                                <AutoInsightsPanel sessionId={sessionId} />
+                                <AutoInsightsPanel sessionId={sessionId} model={selectedModel} />
                             </TabsContent>
+
 
                             <TabsContent value="anomalies" className="mt-0 focus-visible:outline-none">
                                 <AnomalyPanel sessionId={sessionId} />

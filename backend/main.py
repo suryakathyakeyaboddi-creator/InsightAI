@@ -86,6 +86,8 @@ app.add_middleware(
 class QueryRequest(BaseModel):
     session_id: str
     question: str
+    model: str = "llama-3.1-8b-instant"
+
 
 
 class AnomalyRequest(BaseModel):
@@ -135,9 +137,39 @@ class AnomalyResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 def _get_session(session_id: str) -> dict:
-    if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return sessions[session_id]
+    """Retrieve session from memory or hydrate from DuckDB if missing."""
+    if session_id in sessions:
+        return sessions[session_id]
+
+    # Persistent recovery: check if table exists in DuckDB
+    table_name = "ds_" + session_id.replace("-", "_")
+    con = _get_db()
+    try:
+        tables = con.execute("SHOW TABLES").fetchall()
+        table_exists = any(t[0] == table_name for t in tables)
+        
+        if table_exists:
+            # Re-extract required metadata
+            df = con.execute(f"SELECT * FROM {table_name}").df()
+            from schema_extractor import extract_schema, schema_to_prompt_text
+            schema = extract_schema(df)
+            schema_text = schema_to_prompt_text(schema)
+            
+            sessions[session_id] = {
+                "df": df,
+                "schema": schema,
+                "schema_text": schema_text,
+                "con": con,
+                "table_name": table_name,
+                "created_at": datetime.now(tz=timezone.utc),
+            }
+            print(f"[session] Hydrated session {session_id} from persistent storage.")
+            return sessions[session_id]
+    except Exception as e:
+        print(f"[session] Failed to hydrate session {session_id}: {e}")
+
+    raise HTTPException(status_code=410, detail="Session expired or not found. Please re-upload your data.")
+
 
 
 # ---------------------------------------------------------------------------
@@ -212,13 +244,14 @@ async def query_data(req: QueryRequest):
     con = _get_db()
 
     try:
-        # Generate SQL with the real table name
-        raw_sql = generate_sql(question, schema_text)
+        # Generate SQL with the real table name and specified model
+        raw_sql = generate_sql(question, schema_text, model=req.model)
         # Replace 'dataset' placeholder from LLM with per-session table
         sql = raw_sql.replace("dataset", table_name)
-        result_df = execute_with_retry(con, sql, question, schema_text)
-        chart_type = select_chart_type(question, result_df)
-        insight = generate_insight(question, result_df)
+        result_df = execute_with_retry(con, sql, question, schema_text, model=req.model)
+        chart_type = select_chart_type(question, result_df, model=req.model)
+        insight = generate_insight(question, result_df, model=req.model)
+
 
         return QueryResponse(
             sql=raw_sql,  # return clean SQL for display
@@ -236,13 +269,15 @@ async def query_data(req: QueryRequest):
 
 
 @app.get("/api/auto-insights", response_model=AutoInsightsResponse)
-async def auto_insights_endpoint(session_id: str = Query(...)):
+async def auto_insights_endpoint(session_id: str = Query(...), model: str = "llama-3.1-8b-instant"):
     session = _get_session(session_id)
     df = session["df"]
     schema = session["schema"]
 
-    # Return cached insights if available, else compute
-    insights = session.get("auto_insights") or auto_insights(df, schema)
+    # Return cached insights if available (and no model change), else compute
+    # For now, always re-compute if model is provided to ensure it uses the desired model
+    insights = auto_insights(df, schema, model=model)
+
     corr_df = compute_correlations(df)
 
     if corr_df.empty:

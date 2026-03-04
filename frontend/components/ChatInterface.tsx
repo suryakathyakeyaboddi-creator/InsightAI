@@ -31,6 +31,7 @@ interface Message {
 interface ChatInterfaceProps {
     sessionId: string;
     schema?: any;
+    model?: string;
 }
 
 // ─── Suggestion Generator ─────────────────────────────────────────────────────
@@ -110,7 +111,7 @@ function SqlBlock({ sql }: { sql: string }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function ChatInterface({ sessionId, schema }: ChatInterfaceProps) {
+export default function ChatInterface({ sessionId, schema, model = 'llama-3.1-8b-instant' }: ChatInterfaceProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
@@ -134,7 +135,7 @@ export default function ChatInterface({ sessionId, schema }: ChatInterfaceProps)
         setLoading(true);
 
         try {
-            const res = await queryData(q, sessionId);
+            const res = await queryData(q, sessionId, model);
             const assistantMsg: Message = {
                 role: 'assistant',
                 content: res.insight ?? 'Here are the results:',

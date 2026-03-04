@@ -8,6 +8,7 @@ import { getAutoInsights } from '@/lib/api';
 
 interface AutoInsightsPanelProps {
     sessionId: string;
+    model?: string;
 }
 
 // ── Correlation Heatmap (same helper as AnomalyPanel) ────────────────────────
@@ -84,7 +85,7 @@ const GRADIENTS = [
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function AutoInsightsPanel({ sessionId }: AutoInsightsPanelProps) {
+export default function AutoInsightsPanel({ sessionId, model = 'llama-3.1-8b-instant' }: AutoInsightsPanelProps) {
     const [insights, setInsights] = useState<string[]>([]);
     const [corr, setCorr] = useState<{ columns: string[]; data: number[][] } | null>(null);
     const [loading, setLoading] = useState(true);
@@ -94,7 +95,7 @@ export default function AutoInsightsPanel({ sessionId }: AutoInsightsPanelProps)
         let cancelled = false;
         async function fetch() {
             try {
-                const res = await getAutoInsights(sessionId);
+                const res = await getAutoInsights(sessionId, model);
                 if (!cancelled) {
                     setInsights(res.insights ?? []);
                     setCorr(res.correlation ?? null);
@@ -108,7 +109,7 @@ export default function AutoInsightsPanel({ sessionId }: AutoInsightsPanelProps)
         }
         fetch();
         return () => { cancelled = true; };
-    }, [sessionId]);
+    }, [sessionId, model]);
 
     // ── Loading ─────────────────────────────────────────────────────────────────
     if (loading) {

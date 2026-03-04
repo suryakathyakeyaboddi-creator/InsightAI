@@ -21,7 +21,7 @@ def _clean_sql(sql: str) -> str:
     return sql.strip()
 
 
-def generate_sql(question: str, schema_text: str) -> str:
+def generate_sql(question: str, schema_text: str, model: str = "llama-3.1-8b-instant") -> str:
     prompt = (
         f"Dataset schema (DuckDB, table name is 'dataset'):\n{schema_text}\n\n"
         f"Write a DuckDB SQL query to answer: {question}\n\n"
@@ -33,7 +33,7 @@ def generate_sql(question: str, schema_text: str) -> str:
         "5. Use standard DuckDB/PostgreSQL SQL syntax"
     )
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )
@@ -45,6 +45,7 @@ def execute_with_retry(
     sql: str,
     question: str,
     schema_text: str,
+    model: str = "llama-3.1-8b-instant",
     retries: int = 2,
 ) -> pd.DataFrame:
     last_error = None
@@ -65,7 +66,7 @@ def execute_with_retry(
                     "3. Return ONLY the fixed SQL — no markdown, no explanation"
                 )
                 response = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                    model=model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0,
                 )
@@ -73,7 +74,7 @@ def execute_with_retry(
     raise ValueError(str(last_error))
 
 
-def select_chart_type(question: str, result_df: pd.DataFrame) -> str:
+def select_chart_type(question: str, result_df: pd.DataFrame, model: str = "llama-3.1-8b-instant") -> str:
     prompt = (
         f"User question: '{question}'\n"
         f"Result columns: {list(result_df.columns)}\n"
@@ -82,7 +83,7 @@ def select_chart_type(question: str, result_df: pd.DataFrame) -> str:
         "Return ONLY the chart type string, nothing else."
     )
     response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )

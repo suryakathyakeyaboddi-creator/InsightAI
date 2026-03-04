@@ -8,7 +8,7 @@ load_dotenv()
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 
-def auto_insights(df: pd.DataFrame, schema: dict) -> list[str]:
+def auto_insights(df: pd.DataFrame, schema: dict, model: str = "llama-3.1-8b-instant") -> list[str]:
     """Generate exactly 3 high-level insight strings about the dataset using an LLM."""
     numeric_summary = df.describe().to_string()
     schema_lines = "\n".join(
@@ -22,10 +22,11 @@ def auto_insights(df: pd.DataFrame, schema: dict) -> list[str]:
         "Return ONLY 3 lines, one insight per line, no numbering, no bullets."
     )
     response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.4,
     )
+
     raw = response.choices[0].message.content.strip()
     lines = [l.strip() for l in raw.splitlines() if l.strip()]
     # Guarantee exactly 3 strings
