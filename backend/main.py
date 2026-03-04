@@ -15,6 +15,7 @@ from sql_generator import generate_sql, execute_with_retry, select_chart_type
 from insight_generator import generate_insight
 from summarize_generator import generate_page_summary
 from suggested_questions import generate_suggested_questions
+from chat_context_generator import chat_with_context
 from anomaly_detector import auto_insights, compute_correlations, detect_anomalies, get_anomaly_summary
 
 # ---------------------------------------------------------------------------
@@ -149,6 +150,24 @@ class SummaryResponse(BaseModel):
 
 class SuggestedQuestionsResponse(BaseModel):
     questions: list[str]
+
+
+class ContextChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ContextChatRequest(BaseModel):
+    messages: list[ContextChatMessage]
+    current_path: str
+    session_id: str | None = None
+    active_tab: str | None = None
+    data_summary: str | None = None
+    model: str = "llama-3.1-8b-instant"
+
+
+class ContextChatResponse(BaseModel):
+    response: str
 
 
 # ---------------------------------------------------------------------------
@@ -380,4 +399,28 @@ async def suggested_questions_endpoint(req: QueryRequest):
         return SuggestedQuestionsResponse(questions=questions)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/chat-context", response_model=ContextChatResponse)
+async def chat_context_endpoint(req: ContextChatRequest):
+    try:
+        data_summary = req.data_summary
+        
+        if req.session_id and not data_summary:
+            session = _get_session(req.session_id)
+            schema = session["schema"]
+            row_count = len(session["df"])
+            data_summary = f"Dataset: {schema.get('filename', 'Unknown')}\nRows: {row_count}\nColumns: {list(schema.keys())}"
+
+        response_text = chat_with_context(
+            messages=[msg.model_dump() for msg in req.messages],
+            current_path=req.current_path,
+            active_tab=req.active_tab,
+            data_summary=data_summary,
+            model=req.model
+        )
+        return ContextChatResponse(response=response_text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
