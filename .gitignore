@@ -59,8 +59,6 @@ backend/sample_report.pdf
 
 # Test / scratch files
 backend/test_groq.py
-backend/create_pdf.py
-backend/chat_data_generator.py
 
 # IDEs
 .vscode/
