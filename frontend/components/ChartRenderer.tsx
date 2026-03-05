@@ -24,8 +24,10 @@ const commonMargin = { top: 8, right: 12, left: -8, bottom: 0 };
 export default function ChartRenderer({ chartType, data, columns }: ChartRendererProps) {
     if (!data || data.length === 0) {
         return (
-            <div className="flex h-[300px] items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
-                No data to display
+            <div className="flex h-[200px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-sm text-muted-foreground">
+                <span className="text-2xl">🔍</span>
+                <span>No results found for this query.</span>
+                <span className="text-xs opacity-60">Try rephrasing or use a broader search.</span>
             </div>
         );
     }
@@ -33,8 +35,12 @@ export default function ChartRenderer({ chartType, data, columns }: ChartRendere
     const xKey = columns[0];
     const valueKeys = columns.slice(1);
 
+    // Fall back to table if we only have one column — can't render a chart
+    const effectiveChartType = (valueKeys.length === 0 && chartType !== 'table') ? 'table' : chartType;
+
+
     // ── Bar ──────────────────────────────────────────────────────────────────
-    if (chartType === 'bar') {
+    if (effectiveChartType === 'bar') {
         return (
             <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={data} margin={commonMargin}>
@@ -52,7 +58,7 @@ export default function ChartRenderer({ chartType, data, columns }: ChartRendere
     }
 
     // ── Line ─────────────────────────────────────────────────────────────────
-    if (chartType === 'line') {
+    if (effectiveChartType === 'line') {
         return (
             <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={data} margin={commonMargin}>
@@ -78,7 +84,7 @@ export default function ChartRenderer({ chartType, data, columns }: ChartRendere
     }
 
     // ── Pie ──────────────────────────────────────────────────────────────────
-    if (chartType === 'pie') {
+    if (effectiveChartType === 'pie') {
         const valueKey = valueKeys[0] ?? xKey;
         return (
             <ResponsiveContainer width="100%" height={300}>
@@ -107,7 +113,7 @@ export default function ChartRenderer({ chartType, data, columns }: ChartRendere
     }
 
     // ── Scatter ───────────────────────────────────────────────────────────────
-    if (chartType === 'scatter') {
+    if (effectiveChartType === 'scatter') {
         const xScat = columns[0] ?? 'x';
         const yScat = columns[1] ?? 'y';
         return (
@@ -125,6 +131,28 @@ export default function ChartRenderer({ chartType, data, columns }: ChartRendere
     }
 
     // ── Table (default) ───────────────────────────────────────────────────────
+
+    // Helper: format numbers to at most 2 decimal places
+    const formatValue = (val: any): string => {
+        if (val === null || val === undefined) return '—';
+        if (typeof val === 'number' || (!isNaN(Number(val)) && String(val).trim() !== '')) {
+            const n = Number(val);
+            return Number.isInteger(n) ? String(n) : n.toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 0 });
+        }
+        return String(val);
+    };
+
+    // Helper: clean SQL aggregate headers like AVG(RELEASE_YEAR) → Avg Release Year
+    const cleanHeader = (col: string): string => {
+        const match = col.match(/^([A-Z_]+)\((.+)\)$/);
+        if (match) {
+            const fn = match[1].charAt(0) + match[1].slice(1).toLowerCase();
+            const field = match[2].replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            return `${fn} ${field}`;
+        }
+        return col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    };
+
     return (
         <div className="overflow-x-auto rounded-xl border">
             <table className="w-full text-xs">
@@ -132,7 +160,7 @@ export default function ChartRenderer({ chartType, data, columns }: ChartRendere
                     <tr className="border-b bg-muted/50">
                         {columns.map((col) => (
                             <th key={col} className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">
-                                {col}
+                                {cleanHeader(col)}
                             </th>
                         ))}
                     </tr>
@@ -142,7 +170,7 @@ export default function ChartRenderer({ chartType, data, columns }: ChartRendere
                         <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                             {columns.map((col) => (
                                 <td key={col} className="px-3 py-2 font-mono">
-                                    {row[col] !== null && row[col] !== undefined ? String(row[col]) : '—'}
+                                    {formatValue(row[col])}
                                 </td>
                             ))}
                         </tr>

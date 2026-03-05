@@ -16,7 +16,9 @@ from insight_generator import generate_insight
 from summarize_generator import generate_page_summary
 from suggested_questions import generate_suggested_questions
 from chat_context_generator import chat_with_context
+from chat_data_generator import chat_with_data
 from anomaly_detector import auto_insights, compute_correlations, detect_anomalies, get_anomaly_summary
+import forum_store
 
 # ---------------------------------------------------------------------------
 # Persistent DuckDB
@@ -224,8 +226,8 @@ def read_root():
 
 @app.post("/api/upload", response_model=UploadResponse)
 async def upload_file(file: UploadFile = File(...)):
-    if not file.filename.endswith((".csv", ".xlsx")):
-        raise HTTPException(status_code=415, detail="Unsupported Media Type: only .csv and .xlsx are accepted")
+    if not file.filename.endswith(('.csv', '.xlsx', '.pdf')):
+        raise HTTPException(status_code=400, detail="Only CSV, XLSX, and PDF files are supported")
 
     file_bytes = await file.read()
     if len(file_bytes) > 50 * 1024 * 1024:
@@ -286,9 +288,20 @@ async def query_data(req: QueryRequest):
         # Replace 'dataset' placeholder from LLM with per-session table
         sql = raw_sql.replace("dataset", table_name)
         result_df = execute_with_retry(con, sql, question, schema_text, model=req.model)
+        
+        # If no rows returned, skip expensive LLM chart_type call
+        if result_df.empty or len(result_df) == 0:
+            return QueryResponse(
+                sql=raw_sql,
+                chart_type="table",
+                data=[],
+                columns=list(result_df.columns),
+                insight="The query ran successfully but returned no results. Try adjusting your filters or rephrasing the question.",
+                row_count=0,
+            )
+
         chart_type = select_chart_type(question, result_df, model=req.model)
         insight = generate_insight(question, result_df, model=req.model)
-
 
         return QueryResponse(
             sql=raw_sql,  # return clean SQL for display
@@ -298,10 +311,22 @@ async def query_data(req: QueryRequest):
             insight=insight,
             row_count=len(result_df),
         )
-    except Exception as e:
+    except ValueError as e:
+        # SQL parse/execution errors - give a helpful message
         raise HTTPException(
             status_code=422,
-            detail={"error": str(e), "suggestion": "Try rephrasing your question"},
+            detail={"error": f"Could not generate a valid query for that question. Try rephrasing it or simplify the question.", "suggestion": str(e)},
+        )
+    except Exception as e:
+        err_msg = str(e)
+        # Shorten known DuckDB errors to something user-friendly
+        if "Binder Error" in err_msg or "Parser Error" in err_msg:
+            err_msg = "The AI generated an invalid SQL query for that question. Please try rephrasing it."
+        elif "does not exist" in err_msg:
+            err_msg = "The AI referenced a column that doesn't exist. Make sure you're asking about columns shown in the Data Schema on the left."
+        raise HTTPException(
+            status_code=422,
+            detail={"error": err_msg, "suggestion": "Try rephrasing your question"},
         )
 
 
@@ -388,8 +413,12 @@ async def preview_data(session_id: str = Query(...), limit: int = Query(100, ge=
     }
 
 
+class SessionRequest(BaseModel):
+    session_id: str
+    model: str = "llama-3.1-8b-instant"
+
 @app.post("/api/suggested-questions", response_model=SuggestedQuestionsResponse)
-async def suggested_questions_endpoint(req: QueryRequest):
+async def suggested_questions_endpoint(req: SessionRequest):
     session = _get_session(req.session_id)
     df = session["df"]
     schema = session["schema"]
@@ -424,3 +453,284 @@ async def chat_context_endpoint(req: ContextChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------------------------------------------------------------------------
+# Chat-with-data (conversational LLM with data context)
+# ---------------------------------------------------------------------------
+
+class ChatDataMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatDataRequest(BaseModel):
+    session_id: str
+    messages: list[ChatDataMessage]
+    model: str = "llama-3.1-8b-instant"
+
+
+class ChatDataResponse(BaseModel):
+    response: str
+
+
+@app.post("/api/chat-data", response_model=ChatDataResponse)
+async def chat_data_endpoint(req: ChatDataRequest):
+    session = _get_session(req.session_id)
+    df = session["df"]
+    schema_text = session["schema_text"]
+
+    try:
+        messages = [{"role": m.role, "content": m.content} for m in req.messages]
+        answer = chat_with_data(
+            messages=messages,
+            schema_text=schema_text,
+            df=df,
+            model=req.model,
+        )
+        return ChatDataResponse(response=answer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI generation failed: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Visualize — compute chart data for all columns
+# ---------------------------------------------------------------------------
+
+@app.get("/api/visualize")
+async def visualize_endpoint(session_id: str = Query(...)):
+    session = _get_session(session_id)
+    df = session["df"]
+    schema = session["schema"]
+
+    charts = []
+
+    numeric_cols = schema.get("_numeric_cols", [])
+    date_cols = schema.get("_date_cols", [])
+    all_cols = [c for c in df.columns if c not in ["_numeric_cols", "_date_cols"]]
+    categorical_cols = [c for c in all_cols if c not in numeric_cols and c not in date_cols]
+
+    # ── Numeric: distribution histogram (binned) ──────────────────────────────
+    for col in numeric_cols[:6]:  # max 6 numeric charts
+        series = df[col].dropna()
+        if len(series) < 2:
+            continue
+        try:
+            counts, bin_edges = __import__("numpy").histogram(series, bins=12)
+            bars = [
+                {"range": f"{bin_edges[i]:.1f}–{bin_edges[i+1]:.1f}", "count": int(counts[i])}
+                for i in range(len(counts)) if counts[i] > 0
+            ]
+            if bars:
+                charts.append({
+                    "id": f"num_{col}",
+                    "title": col.replace("_", " ").title(),
+                    "subtitle": "Distribution",
+                    "type": "bar",
+                    "xKey": "range",
+                    "valueKey": "count",
+                    "data": bars,
+                    "color": "#6366F1",
+                })
+        except Exception:
+            pass
+
+    # ── Categorical: top 10 value counts ─────────────────────────────────────
+    for col in categorical_cols[:5]:  # max 5 categorical charts
+        series = df[col].dropna().astype(str)
+        if series.nunique() > 80 or series.nunique() < 2:
+            continue
+        top = series.value_counts().head(10)
+        bars = [{"label": str(k), "count": int(v)} for k, v in top.items()]
+        if bars:
+            charts.append({
+                "id": f"cat_{col}",
+                "title": col.replace("_", " ").title(),
+                "subtitle": f"Top {len(bars)} values",
+                "type": "bar",
+                "xKey": "label",
+                "valueKey": "count",
+                "data": bars,
+                "color": "#06B6D4",
+            })
+
+    # ── Date + numeric: time series for first numeric col ────────────────────
+    if date_cols and numeric_cols:
+        date_col = date_cols[0]
+        val_col = numeric_cols[0]
+        try:
+            ts_df = df[[date_col, val_col]].dropna().copy()
+            ts_df[date_col] = __import__("pandas").to_datetime(ts_df[date_col], errors="coerce")
+            ts_df = ts_df.dropna().sort_values(date_col)
+            # Resample to max 60 points
+            if len(ts_df) > 60:
+                step = max(1, len(ts_df) // 60)
+                ts_df = ts_df.iloc[::step]
+            ts_data = [
+                {"date": str(row[date_col].date()), "value": round(float(row[val_col]), 2)}
+                for _, row in ts_df.iterrows()
+            ]
+            if ts_data:
+                charts.append({
+                    "id": f"ts_{date_col}_{val_col}",
+                    "title": f"{val_col.replace('_',' ').title()} Over Time",
+                    "subtitle": f"by {date_col}",
+                    "type": "line",
+                    "xKey": "date",
+                    "valueKey": "value",
+                    "data": ts_data,
+                    "color": "#10B981",
+                })
+        except Exception:
+            pass
+
+    # ── Summary stats card ────────────────────────────────────────────────────
+    stats = []
+    for col in numeric_cols[:5]:
+        s = df[col].dropna()
+        if len(s) > 0:
+            stats.append({
+                "col": col.replace("_", " ").title(),
+                "min": round(float(s.min()), 2),
+                "max": round(float(s.max()), 2),
+                "mean": round(float(s.mean()), 2),
+                "median": round(float(s.median()), 2),
+            })
+
+    return {"charts": charts, "stats": stats, "row_count": len(df), "col_count": len(df.columns)}
+
+
+# ---------------------------------------------------------------------------
+# Business Tip — single powerful AI-driven recommendation from data
+# ---------------------------------------------------------------------------
+
+class BusinessTipRequest(BaseModel):
+    session_id: str
+    model: str = "llama-3.1-8b-instant"
+
+
+@app.post("/api/business-tip")
+async def business_tip_endpoint(req: BusinessTipRequest):
+    import re as _re
+    from groq import Groq as _Groq
+    session = _get_session(req.session_id)
+    df = session["df"]
+    schema_text = session["schema_text"]
+    schema = session["schema"]
+
+    # Build a compact data digest for the LLM  (keep small to stay under free-tier TPM limits)
+    numeric_cols = schema.get("_numeric_cols", [])
+    sample = df.head(15).to_dict(orient="records")  # 15 rows max
+
+    # Compute quick aggregate stats per numeric col
+    agg_lines = []
+    for col in numeric_cols[:6]:
+        s = df[col].dropna()
+        if len(s) > 0:
+            agg_lines.append(
+                f"  {col}: min={s.min():.2f}, max={s.max():.2f}, "
+                f"mean={s.mean():.2f}, total={s.sum():.2f}"
+            )
+    agg_text = "\n".join(agg_lines) if agg_lines else "No numeric columns available."
+
+    prompt = (
+        "You are a world-class business strategist and data analyst. "
+        "A user has uploaded the following dataset and wants your single most powerful, "
+        "actionable business recommendation based on what the data actually shows.\n\n"
+        f"Dataset Schema:\n{schema_text}\n\n"
+        f"Key Numeric Statistics:\n{agg_text}\n\n"
+        f"Sample Data (first 40 rows):\n{sample}\n\n"
+        "Give EXACTLY ONE powerful, specific business tip. Requirements:\n"
+        "- It MUST reference real numbers or patterns from this data\n"
+        "- It must be immediately actionable (something they can act on today)\n"
+        "- Quantify the potential business impact where possible\n"
+        "- Be direct, confident, and specific — not generic\n"
+        "- Start with a bold one-line headline, then 2-3 sentences of detail\n"
+        "- Do NOT use markdown asterisks — use plain text only\n"
+        "- Maximum 4 sentences total"
+    )
+
+    client = _Groq(api_key=os.environ.get("GROQ_API_KEY"))
+    response = client.chat.completions.create(
+        model=req.model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.5,
+    )
+    tip = response.choices[0].message.content.strip()
+    # Clean any leftover markdown asterisks
+    tip = _re.sub(r"\*{1,3}(.*?)\*{1,3}", r"\1", tip)
+    tip = _re.sub(r"<think>.*?</think>", "", tip, flags=_re.IGNORECASE | _re.DOTALL).strip()
+
+    return {"tip": tip}
+
+
+# ---------------------------------------------------------------------------
+# Forum — community discussion board
+# ---------------------------------------------------------------------------
+
+class CreatePostRequest(BaseModel):
+    author: str
+    title: str
+    content: str
+    tag: str = "General"
+
+
+class ReplyRequest(BaseModel):
+    author: str
+    content: str
+
+
+class LikeRequest(BaseModel):
+    user_token: str   # client-generated UUID stored in localStorage
+
+
+FORUM_TAGS = ["General", "Insights", "Strategy", "Data Quality", "Analytics", "Question", "Announcement"]
+
+
+@app.get("/api/forum/posts")
+async def forum_get_posts():
+    posts = forum_store.get_posts()
+    clean = []
+    for p in posts:
+        # Exclude liked_by but keep replies so the thread view works
+        cp = {k: v for k, v in p.items() if k != "liked_by"}
+        cp["reply_count"] = len(p.get("replies", []))
+        clean.append(cp)
+    return {"posts": clean, "tags": FORUM_TAGS}
+
+
+@app.get("/api/forum/posts/{post_id}")
+async def forum_get_single_post(post_id: str):
+    posts = forum_store.get_posts()
+    for p in posts:
+        if p["id"] == post_id:
+            cp = {k: v for k, v in p.items() if k != "liked_by"}
+            cp["reply_count"] = len(p.get("replies", []))
+            return cp
+    raise HTTPException(status_code=404, detail="Post not found.")
+
+
+@app.post("/api/forum/posts", status_code=201)
+async def forum_create_post(req: CreatePostRequest):
+    if not req.title.strip() or not req.content.strip():
+        raise HTTPException(status_code=400, detail="Title and content are required.")
+    if req.tag not in FORUM_TAGS:
+        raise HTTPException(status_code=400, detail=f"Invalid tag. Choose from: {FORUM_TAGS}")
+    post = forum_store.create_post(req.author, req.title, req.content, req.tag)
+    return post
+
+
+@app.post("/api/forum/posts/{post_id}/reply", status_code=201)
+async def forum_add_reply(post_id: str, req: ReplyRequest):
+    if not req.content.strip():
+        raise HTTPException(status_code=400, detail="Reply content is required.")
+    reply = forum_store.add_reply(post_id, req.author, req.content)
+    if reply is None:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    return reply
+
+
+@app.post("/api/forum/posts/{post_id}/like")
+async def forum_toggle_like(post_id: str, req: LikeRequest):
+    result = forum_store.toggle_like(post_id, req.user_token)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    return result

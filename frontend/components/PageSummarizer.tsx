@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Bot, Loader2, X, Send } from 'lucide-react';
 import { summarizePageContext, chatPageContext } from '@/lib/api';
 import { toast } from 'sonner';
+import ReactMarkdown from 'react-markdown';
 
 interface PageSummarizerProps {
     sessionId?: string | null;
@@ -127,9 +128,22 @@ export default function PageSummarizer({ sessionId, activeTab, model = 'llama-3.
                                             : 'bg-muted/50 rounded-tl-sm text-foreground/90 prose prose-sm dark:prose-invert'}
                                     `}>
                                         {msg.role === 'assistant' ? (
-                                            msg.content.split('\n').map((line, j) => (
-                                                <p key={j} className="mb-2 last:mb-0">{line}</p>
-                                            ))
+                                            <ReactMarkdown
+                                                components={{
+                                                    p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                                                    strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                                                    em: ({ children }) => <em className="italic">{children}</em>,
+                                                    ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+                                                    ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+                                                    li: ({ children }) => <li className="text-sm">{children}</li>,
+                                                    h1: ({ children }) => <h1 className="font-bold text-sm mb-1">{children}</h1>,
+                                                    h2: ({ children }) => <h2 className="font-semibold text-sm mb-1">{children}</h2>,
+                                                    h3: ({ children }) => <h3 className="font-semibold text-sm mb-1">{children}</h3>,
+                                                    code: ({ children }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">{children}</code>,
+                                                }}
+                                            >
+                                                {msg.content}
+                                            </ReactMarkdown>
                                         ) : (
                                             msg.content
                                         )}

@@ -38,7 +38,10 @@ def generate_sql(question: str, schema_text: str, model: str = "llama-3.1-8b-ins
         "2. Column names with spaces or special characters MUST be wrapped in double-quotes, e.g. \"math score\"\n"
         "3. NEVER use backticks (`) — DuckDB does not support MySQL-style backtick quoting\n"
         "4. Return ONLY the raw SQL — no markdown, no ```sql fences, no explanation\n"
-        "5. Use standard DuckDB/PostgreSQL SQL syntax"
+        "5. Use standard DuckDB/PostgreSQL SQL syntax\n"
+        "6. IMPORTANT - Date columns marked as [DATE STRING] are stored as VARCHAR. "
+        "When using EXTRACT, date_part, or any date function on them, you MUST first cast them: "
+        "TRY_CAST(\"DateCol\" AS DATE). Example: EXTRACT(YEAR FROM TRY_CAST(\"Date\" AS DATE))"
     )
     response = client.chat.completions.create(
         model=model,

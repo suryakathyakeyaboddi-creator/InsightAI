@@ -3,7 +3,7 @@
 import { Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Database, Rows3, Columns3, ArrowLeft } from 'lucide-react';
+import { Database, Rows3, Columns3, ArrowLeft, LogOut } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -12,12 +12,15 @@ import ChatInterface from '@/components/ChatInterface';
 import AutoInsightsPanel from '@/components/AutoInsightsPanel';
 import AnomalyPanel from '@/components/AnomalyPanel';
 import DataPreviewTable from '@/components/DataPreviewTable';
+import DataVisualizationPanel from '@/components/DataVisualizationPanel';
+import ForumPanel from '@/components/ForumPanel';
 import PageSummarizer from '@/components/PageSummarizer';
 
 const MODELS = [
     { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B', desc: 'Fastest & Efficient' },
     { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B', desc: 'Most Powerful' },
-    { id: 'qwen/qwen3-32b', name: 'Qwen 3 32B', desc: 'High Quality Alternative' },
+    { id: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout', desc: 'Newest · Best Context' },
+    { id: 'meta-llama/llama-4-maverick-17b-128e-instruct', name: 'Llama 4 Maverick', desc: 'Newest · High Quality' },
 ];
 
 function DashboardContent() {
@@ -28,6 +31,19 @@ function DashboardContent() {
     const [schema, setSchema] = useState<any>(null);
     const [selectedModel, setSelectedModel] = useState(MODELS[0].id);
     const [activeTab, setActiveTab] = useState('chat');
+    const [user, setUser] = useState<{ email: string; name: string } | null>(null);
+
+    useEffect(() => {
+        const stored = localStorage.getItem('insightai_user');
+        if (stored) {
+            try { setUser(JSON.parse(stored)); } catch {}
+        }
+    }, []);
+
+    const handleSignOut = () => {
+        localStorage.removeItem('insightai_user');
+        router.push('/auth');
+    };
 
     useEffect(() => {
         if (!sessionId) {
@@ -146,14 +162,37 @@ function DashboardContent() {
                         )}
                     </div>
 
-                    {/* Back link */}
-                    <div className="border-t p-4 bg-muted/20">
-                        <button
-                            onClick={() => router.push('/')}
-                            className="flex w-full items-center justify-center gap-2 rounded-xl border bg-background px-4 py-2.5 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-all active:scale-95 shadow-sm"
-                        >
-                            <ArrowLeft className="h-4 w-4" /> New Dataset
-                        </button>
+                    {/* User profile + sign out */}
+                    <div className="border-t p-4 space-y-2 bg-muted/20">
+                        {user && (
+                            <div className="flex items-center gap-3 rounded-xl bg-background border px-3 py-2.5">
+                                <div className="h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+                                    style={{ background: 'linear-gradient(135deg, #7C3AED, #6366F1)' }}>
+                                    {(user.name?.[0] ?? user.email?.[0] ?? 'U').toUpperCase()}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    {user.name && (
+                                        <p className="text-xs font-semibold truncate">{user.name}</p>
+                                    )}
+                                    <p className="text-[10px] text-muted-foreground truncate">{user.email}</p>
+                                </div>
+                            </div>
+                        )}
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => router.push('/')}
+                                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border bg-background px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
+                            >
+                                <ArrowLeft className="h-3.5 w-3.5" /> New Dataset
+                            </button>
+                            <button
+                                onClick={handleSignOut}
+                                className="flex items-center justify-center gap-1.5 rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-900 px-3 py-2 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/40 transition-all"
+                                title="Sign out"
+                            >
+                                <LogOut className="h-3.5 w-3.5" />
+                            </button>
+                        </div>
                     </div>
                 </aside>
 
@@ -176,6 +215,8 @@ function DashboardContent() {
                                 <TabsTrigger value="insights" className="rounded-xl px-5 py-2 data-[state=active]:bg-background data-[state=active]:shadow-md">Auto Insights</TabsTrigger>
                                 <TabsTrigger value="anomalies" className="rounded-xl px-5 py-2 data-[state=active]:bg-background data-[state=active]:shadow-md">Anomalies</TabsTrigger>
                                 <TabsTrigger value="raw" className="rounded-xl px-5 py-2 data-[state=active]:bg-background data-[state=active]:shadow-md">Raw Data</TabsTrigger>
+                                <TabsTrigger value="visualize" className="rounded-xl px-5 py-2 data-[state=active]:bg-background data-[state=active]:shadow-md">Visualize</TabsTrigger>
+                                <TabsTrigger value="forum" className="rounded-xl px-5 py-2 data-[state=active]:bg-background data-[state=active]:shadow-md">Forum</TabsTrigger>
                             </TabsList>
 
                             <TabsContent value="chat" className="mt-0 focus-visible:outline-none">
@@ -193,6 +234,14 @@ function DashboardContent() {
 
                             <TabsContent value="raw" className="mt-0 focus-visible:outline-none">
                                 <DataPreviewTable sessionId={sessionId} />
+                            </TabsContent>
+
+                            <TabsContent value="visualize" className="mt-0 focus-visible:outline-none">
+                                <DataVisualizationPanel sessionId={sessionId} model={selectedModel} />
+                            </TabsContent>
+
+                            <TabsContent value="forum" className="mt-0 focus-visible:outline-none">
+                                <ForumPanel />
                             </TabsContent>
                         </Tabs>
                     </div>

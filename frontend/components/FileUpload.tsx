@@ -25,7 +25,7 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
 
     const onDrop = useCallback((accepted: File[], rejected: any[]) => {
         if (rejected.length) {
-            toast.error('Only .csv and .xlsx files are accepted.');
+            toast.error('Only .csv, .xlsx, and .pdf files are accepted.');
             return;
         }
         setSelectedFile(accepted[0]);
@@ -36,6 +36,7 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
         accept: {
             'text/csv': ['.csv'],
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+            'application/pdf': ['.pdf'],
         },
         maxFiles: 1,
         disabled: uploading,
@@ -77,7 +78,7 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
                     <p className="text-sm font-semibold text-foreground">
                         {isDragActive ? 'Drop the file here…' : 'Drag & drop your dataset here'}
                     </p>
-                    <p className="mt-1 text-xs text-muted-foreground">Supports .csv and .xlsx · Max 50 MB</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Supports .csv, .xlsx, and .pdf · Max 50 MB</p>
                 </div>
                 <span className="rounded-full border border-violet-400 px-4 py-1 text-xs font-medium text-violet-500 hover:bg-violet-500 hover:text-white transition-colors">
                     Browse files
